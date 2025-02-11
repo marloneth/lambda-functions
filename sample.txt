@@ -1,0 +1,3 @@
+Hello,
+Welcome to Vim Tutorial for beginners.
+Texto agregado en edicion.Hello

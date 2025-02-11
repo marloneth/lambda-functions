@@ -1,0 +1,24 @@
+{
+  "state": {
+    "reported": {
+      "1830:z1Real": 100.39,
+      "1830:z1Setpoint": 6296.07,
+      "#SYS_UPTIME": 19712.09
+    }
+  },
+  "metadata": {
+    "reported": {
+      "1830:z1Real": {
+        "timestamp": 1738703573
+      },
+      "1830:z1Setpoint": {
+        "timestamp": 1738703573
+      },
+      "#SYS_UPTIME": {
+        "timestamp": 1738703573
+      }
+    }
+  },
+  "version": 778812,
+  "timestamp": 1738703573
+}
