@@ -4,29 +4,6 @@ import moment from "moment";
 
 const ON = "on";
 const OFF = "off";
-const ON_COMMANDS = {
-  1: "CAEB", //080101: 00001000 00000001 00000001
-  2: "CAIC", //080202: 00001000 00000010 00000010
-  3: "CAQE", //080404: 00001000 00000100 00000100
-  4: "CAgI", //080808: 00001000 00001000 00001000
-  5: "CBAQ", //081010: 00001000 00010000 00010000
-  6: "CCAg", //082020: 00001000 00100000 00100000
-  7: "CEBA", //084040: 00001000 01000000 01000000
-  8: "CICA", //088080: 00001000 10000000 10000000
-  all: "CP//", //08ffff: 00001000 11111111 11111111
-};
-
-const OFF_COMMANDS = {
-  1: "CAEA", //080100: 00001000 00000001 00000000
-  2: "CAIA", //080200: 00001000 00000010 00000000
-  3: "CAQA", //080400: 00001000 00000100 00000000
-  4: "CAgA", //080800: 00001000 00001000 00000000
-  5: "CBAA", //081000: 00001000 00010000 00000000
-  6: "CCAA", //082000: 00001000 00100000 00000000
-  7: "CEAA", //084000: 00001000 01000000 00000000
-  8: "CIAA", //088000: 00001000 10000000 00000000
-  all: "CP8A", //08ff00: 00001000 11111111 00000000
-};
 
 const devicesLight = {
   "24e124756d182982": {}, //Luminaria - Mountage
@@ -108,30 +85,46 @@ const iotData = new AWS.IotData({
   endpoint: process.env.ENDPOINT,
 });
 
+const generateCommand = (data) => {
+  const channel = 0x08;
+  let controlFlags = 0x00;
+  let switchFlags = 0x00;
+  let byteArray = null;
+
+  for (let i = 0; i < 8; i++) {
+    const switchTag = `switch_${i + 1}`;
+
+    if (!data.hasOwnProperty(switchTag)) continue;
+    // Permitir control para este switch
+    controlFlags |= 1 << i;
+
+    // Establecer el estado del switch (1 = abierto, 0 = cerrado)
+    if (!data[switchTag]) continue;
+    switchFlags |= 1 << i;
+  }
+
+  byteArray = new Uint8Array([channel, controlFlags, switchFlags]);
+  return btoa(String.fromCharCode(...byteArray));
+};
+
 export const handler = async (event) => {
-  const promises = [];
-  const { deveui, data, time } = event;
+  const switchesData = {};
+  const { deveui, data } = event;
 
   if (!Object.keys(devicesLight).includes(deveui)) {
-    console.log("El dispositivo actual no esta en la lista");
+    console.log(`El dispositivo ${deveui} no esta en la lista`);
     return;
   }
 
   const lightsSchedule = Object.entries(devicesLight[deveui]);
   if (!Object.keys(lightsSchedule).length) {
-    console.log("El dispositivo actual no tiene horarios programados");
+    console.log(`El dispositivo ${deveui} no tiene horarios programados`);
     return;
   }
 
-  for (const [switchName, { onTime, offTime }] of lightsSchedule) {
-    let params = {
-      topic: `/TD/downlink/${deveui}`,
-      qos: 0,
-    };
-
-    const now = moment(time).utc();
-    const currentSwitchStatus = data[switchName];
-    const [_, switchNumber] = switchName.split("_");
+  for (const [switchTag, { onTime, offTime }] of lightsSchedule) {
+    const now = moment().subtract(7, "hours").utc();
+    const currentSwitchStatus = data[switchTag];
     const nowDate = now.format("YYYY-MM-DD");
     const startLightOn = moment(
       `${nowDate} ${onTime}`,
@@ -153,25 +146,35 @@ export const handler = async (event) => {
 
     if (currentSwitchStatus === ON && !shouldBeOn) {
       // APAGAR
-      console.log("Luminaria encendida, deberia estar apagada. APAGANDO");
-      params.payload = JSON.stringify({ data: OFF_COMMANDS[switchNumber] });
+      console.log(
+        `Luminaria ${deveui} - ${switchTag} encendida, deberia estar apagada. APAGANDO`
+      );
+      switchesData[switchTag] = 1;
     }
 
     if (currentSwitchStatus === OFF && shouldBeOn) {
       // ENCENDER
-      console.log("Luminaria apagada, deberia estar encendida. ENCENDIENDO");
-      params.payload = JSON.stringify({ data: ON_COMMANDS[switchNumber] });
+      console.log(
+        `Luminaria ${deveui} - ${switchTag} apagada, deberia estar encendida. ENCENDIENDO`
+      );
+      switchesData[switchTag] = 0;
     }
-
-    if (params.payload) promises.push(iotData.publish(params).promise());
   }
 
+  if (!Object.keys(switchesData).length) return;
+
   try {
-    await Promise.all(promises);
-    console.log("Todas las peticiones completadas.");
+    const params = {
+      topic: `/TD/downlink/${deveui}`,
+      qos: 0,
+      payload: JSON.stringify({ data: generateCommand(switchesData) }),
+    };
+
+    await iotData.publish(params).promise();
+    console.log("Peticion completada.");
     return { status: 200 };
   } catch (error) {
-    console.error("Error al procesar las peticiones:", error.message);
+    console.error("Error al procesar la peticion:", error.message);
     return { status: 500, error: error.message };
   }
 };
